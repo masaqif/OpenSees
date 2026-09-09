@@ -2,11 +2,13 @@
 """Run OpenSeesPy regression tests against a freshly built module."""
 
 import argparse
+import importlib.machinery
+import importlib.util
 import os
 from pathlib import Path
-import shutil
-import subprocess
 import sys
+
+import pytest
 
 
 def main() -> int:
@@ -24,29 +26,20 @@ def main() -> int:
     if not module.is_file():
         parser.error(f"OpenSeesPy module does not exist: {module}")
 
-    # The extension exports PyInit_opensees, while the CMake target is named
-    # OpenSeesPy. Keep the alias beside the built module so its dependencies
-    # resolve consistently on Linux, macOS, and Windows.
-    alias_name = "opensees.pyd" if os.name == "nt" else "opensees.so"
-    alias = module.parent / alias_name
-    shutil.copy2(module, alias)
-
-    env = os.environ.copy()
-    python_path = str(module.parent)
-    if env.get("PYTHONPATH"):
-        python_path += os.pathsep + env["PYTHONPATH"]
-    env["PYTHONPATH"] = python_path
-
+    # Load the requested binary by its exported PyInit_opensees entry point;
+    # never replace an existing alias or silently test a pip installation.
+    dll_directory = os.add_dll_directory(str(module.parent)) if os.name == "nt" else None
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", *args.tests_dir],
-            cwd=module.parent,
-            env=env,
-            check=False,
-        )
-        return result.returncode
+        loader = importlib.machinery.ExtensionFileLoader("opensees", str(module))
+        spec = importlib.util.spec_from_file_location("opensees", module, loader=loader)
+        extension = importlib.util.module_from_spec(spec)
+        loader.exec_module(extension)
+        sys.modules["opensees"] = extension
+        print(f"Testing OpenSeesPy module: {module}", flush=True)
+        return pytest.main(["-q", *args.tests_dir])
     finally:
-        alias.unlink(missing_ok=True)
+        if dll_directory is not None:
+            dll_directory.close()
 
 
 if __name__ == "__main__":
