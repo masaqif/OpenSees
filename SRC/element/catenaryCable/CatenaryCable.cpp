@@ -1117,6 +1117,7 @@ CatenaryCable::setResponse(const char **argv, int argc, OPS_Stream &output)
             theResponse =  new ElementResponse(this, 2, Vector(2));
     }
 
+    output.endTag();
     return theResponse;
 }
 
